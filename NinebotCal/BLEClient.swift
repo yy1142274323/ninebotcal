@@ -21,7 +21,7 @@ final class BLEClient: NSObject, ObservableObject {
     private var peripheral: CBPeripheral?
     private var txChar: CBCharacteristic?
     private var rxChar: CBCharacteristic?
-    private var discovered: [UUID: CBPeripheral] = []
+    private var discovered: [UUID: CBPeripheral] = [:]
     private var connectContinuation: CheckedContinuation<Void, Error>?
     private var serviceContinuation: CheckedContinuation<Void, Error>?
     private var writeContinuations: [CheckedContinuation<Void, Error>] = []

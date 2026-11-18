@@ -79,9 +79,20 @@ final class CredentialStore: ObservableObject {
         do {
             let root = "/var/mobile/Containers/Data/Application"
             let fm = FileManager.default
-            guard let dirs = try? fm.contentsOfDirectory(atPath: root) else {
-                append("读不到 /var/mobile/Containers/Data/Application —— 本 App 仍然被沙盒限制（装的是无特权版？）")
-                report("无沙盒权限")
+            var isDir: ObjCBool = false
+            let exists = fm.fileExists(atPath: root, isDirectory: &isDir)
+            append("权限自检：路径存在=\(exists) 是目录=\(isDir.boolValue)")
+
+            let dirs: [String]
+            do {
+                dirs = try fm.contentsOfDirectory(atPath: root)
+            } catch {
+                let ns = error as NSError
+                append("列目录失败：\(error.localizedDescription)（errno=\(ns.code)）")
+                append("判定：本 App 没有跨沙盒权限。需要 entitlements 里的")
+                append("  com.apple.private.security.storage.AppDataContainers = true")
+                append("  com.apple.private.security.no-sandbox = true")
+                report("无跨沙盒权限")
                 return
             }
             append("容器总数：\(dirs.count)")

@@ -10,7 +10,8 @@ struct VehicleCredential: Codable, Identifiable, Hashable {
     var id: String { mac + "|" + sn }
 }
 
-/// 凭据存储（Keychain，单条 JSON）+ 越狱环境下从官方九号 App 沙盒导入
+/// 凭据存储（Keychain 单条 JSON）+ 三种导入方式：
+/// 1) 自动扫九号 App 沙盒   2) 从文件导入 .db/.sqlite   3) 手动输入
 final class CredentialStore: ObservableObject {
 
     @Published var items: [VehicleCredential] = []
@@ -71,66 +72,108 @@ final class CredentialStore: ObservableObject {
         SecItemAdd(q as CFDictionary, nil)
     }
 
-    // MARK: - 从九号 App 沙盒导入（越狱 / TrollStore）
-
-    struct ImportError: LocalizedError {
-        let message: String
-        var errorDescription: String? { message }
-    }
+    // MARK: - 方式 1：扫九号 App 沙盒
 
     func importFromNinebotApp() {
         importReport = []
         do {
-            let found = try scanNinebotContainers()
-            guard !found.isEmpty else {
-                throw ImportError(message: "没有在 /var/mobile/Containers/Data/Application 下找到九号 App 的容器；请确认已安装并登录九号出行，且本 App 具备读取沙盒的权限（TrollStore 安装）。")
+            let root = "/var/mobile/Containers/Data/Application"
+            let fm = FileManager.default
+            guard let dirs = try? fm.contentsOfDirectory(atPath: root) else {
+                append("读不到 /var/mobile/Containers/Data/Application —— 本 App 仍然被沙盒限制（装的是无特权版？）")
+                report("无沙盒权限")
+                return
             }
-            for (container, bundleID) in found {
-                importReport.append("容器：\(bundleID) → \(container)")
-                try importDatabases(in: container)
+            append("容器总数：\(dirs.count)")
+
+            var ninebot: [(String, String)] = []
+            var sample: [String] = []
+            for d in dirs {
+                let path = root + "/" + d
+                guard let dict = NSDictionary(contentsOfFile: path + "/.com.apple.mobile_container_manager.metadata.plist") as? [String: Any],
+                      let bid = dict["MCMMetadataIdentifier"] as? String else { continue }
+                let low = bid.lowercased()
+                if low.contains("ninebot") || low.contains("segway") || low.contains("nb.") || low.contains("scooter") {
+                    ninebot.append((path, bid))
+                } else if sample.count < 6 {
+                    sample.append(bid)
+                }
+            }
+
+            if ninebot.isEmpty {
+                append("没有匹配到 ninebot/segway 容器。随机列几个已装 App 的 bundle id：")
+                sample.forEach { append("  · \($0)") }
+                append("→ 说明这台 iPhone 上没装九号出行，或它的 bundle id 不含 ninebot（可把上面列表发我）")
+                report("未找到九号容器")
+                return
+            }
+
+            for (path, bid) in ninebot {
+                append("容器：\(bid)")
+                importDatabases(in: path)
             }
             if items.isEmpty {
-                importReport.append("未在数据库中取到 mac/password，请手动输入。")
+                append("容器找到了，但没取到 mac/password。常见原因：")
+                append("  · 这台 iPhone 没登录过九号出行，或没在这台手机上配对过这辆车")
+                append("  · 凭据存在 Keychain 而不是 SQLite")
+                append("→ 用「从文件导入数据库」或直接在安卓上取密码后手输")
             }
         } catch {
-            importReport.append("导入失败：\(error.localizedDescription)")
+            append("导入失败：\(error.localizedDescription)")
         }
+        report(importReport.joined(separator: "\n"))
     }
 
-    private func scanNinebotContainers() throws -> [(String, String)] {
-        let root = "/var/mobile/Containers/Data/Application"
+    private func importDatabases(in container: String) {
         let fm = FileManager.default
-        guard let dirs = try? fm.contentsOfDirectory(atPath: root) else { return [] }
-        var out: [(String, String)] = []
-        for d in dirs {
-            let path = root + "/" + d
-            let meta = path + "/.com.apple.mobile_container_manager.metadata.plist"
-            guard let dict = NSDictionary(contentsOfFile: meta) as? [String: Any],
-                  let bid = dict["MCMMetadataIdentifier"] as? String else { continue }
-            let lower = bid.lowercased()
-            if lower.contains("ninebot") || lower.contains("segway") {
-                out.append((path, bid))
-            }
-        }
-        return out
-    }
-
-    private func importDatabases(in container: String) throws {
-        let fm = FileManager.default
-        guard let enumerator = fm.enumerator(atPath: container) else { return }
-        for case let rel as String in enumerator {
-            let lower = rel.lowercased()
-            guard lower.hasSuffix(".sqlite") || lower.hasSuffix(".db") || lower.hasSuffix(".sqlite3") else { continue }
+        guard let en = fm.enumerator(atPath: container) else { return }
+        var found = 0
+        for case let rel as String in en {
+            let low = rel.lowercased()
+            guard low.hasSuffix(".sqlite") || low.hasSuffix(".db") || low.hasSuffix(".sqlite3") else { continue }
+            found += 1
             let full = container + "/" + rel
-            importReport.append("检查数据库：\(rel)")
-            readDeviceTable(at: full)
+            let attrs = try? fm.attributesOfItem(atPath: full)
+            let size = (attrs?[.size] as? Int) ?? 0
+            append("  库：\(rel)（\(size) B）")
+            readDeviceTable(at: full, label: rel)
         }
+        if found == 0 { append("  该容器内没有 .sqlite/.db 文件") }
     }
 
-    private func readDeviceTable(at path: String) {
+    // MARK: - 方式 2：从文件导入
+
+    func importDatabase(at path: String) {
+        importReport = []
+        let name = (path as NSString).lastPathComponent
+        append("导入文件：\(name)")
+        // 复制到可写目录（顺带把 -wal/-shm 一起，避免读到旧数据）
+        let tmp = NSTemporaryDirectory() + "imported-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true)
+        let dst = tmp + "/" + name
+        do {
+            try FileManager.default.copyItem(atPath: path, toPath: dst)
+            for suffix in ["-wal", "-shm"] {
+                if FileManager.default.fileExists(atPath: path + suffix) {
+                    try? FileManager.default.copyItem(atPath: path + suffix, toPath: dst + suffix)
+                }
+            }
+        } catch {
+            append("复制失败：\(error.localizedDescription)")
+            report(importReport.joined(separator: "\n"))
+            return
+        }
+        readDeviceTable(at: dst, label: name)
+        if items.isEmpty { append("该库中没有符合条件的 mac/password 记录") }
+        report(importReport.joined(separator: "\n"))
+    }
+
+    // MARK: - SQLite 解析
+
+    private func readDeviceTable(at path: String, label: String) {
         var db: OpaquePointer?
         guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, db != nil else {
-            importReport.append("  打不开（权限或加密）")
+            append("  打不开（加密或权限不足）")
             return
         }
         defer { sqlite3_close(db) }
@@ -143,46 +186,63 @@ final class CredentialStore: ObservableObject {
             }
         }
         sqlite3_finalize(stmt)
+        append("  表：\(tables.prefix(12).joined(separator: ","))\(tables.count > 12 ? " …" : "")")
 
-        guard let table = tables.first(where: { $0.uppercased() == "DEVICE" })
-                ?? tables.first(where: { $0.uppercased().contains("DEVICE") }) else { return }
+        // 优先 DEVICE，其次任何带 mac+pass 字段的表
+        var candidates: [String] = []
+        if let t = tables.first(where: { $0.uppercased() == "DEVICE" }) { candidates.append(t) }
+        candidates.append(contentsOf: tables.filter { $0.uppercased() != "DEVICE" })
 
-        var cols: [String] = []
-        if sqlite3_prepare_v2(db, "PRAGMA table_info(\(table))", -1, &stmt, nil) == SQLITE_OK {
+        for table in candidates {
+            var cols: [String] = []
+            if sqlite3_prepare_v2(db, "PRAGMA table_info(\(table))", -1, &stmt, nil) == SQLITE_OK {
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    if let c = sqlite3_column_text(stmt, 1) { cols.append(String(cString: c)) }
+                }
+            }
+            sqlite3_finalize(stmt)
+            guard !cols.isEmpty else { continue }
+
+            func pick(_ keys: [String]) -> String? {
+                cols.first { c in keys.contains { c.lowercased().contains($0) } }
+            }
+            guard let macCol = pick(["mac"]),
+                  let pwdCol = pick(["password", "pwd", "pass", "key", "secret"]) else { continue }
+
+            let snCol = pick(["sn", "serial"]) ?? macCol
+            let sql = "SELECT \(macCol), \(pwdCol), \(snCol) FROM \(table)"
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { continue }
+            defer { sqlite3_finalize(stmt) }
+
+            var count = 0
             while sqlite3_step(stmt) == SQLITE_ROW {
-                if let c = sqlite3_column_text(stmt, 1) { cols.append(String(cString: c)) }
+                func text(_ i: Int32) -> String {
+                    guard let c = sqlite3_column_text(stmt, i) else { return "" }
+                    return String(cString: c)
+                }
+                let mac = text(0), pwd = text(1), sn = text(2)
+                guard !pwd.isEmpty, !mac.isEmpty else { continue }
+                let cred = VehicleCredential(mac: mac, sn: sn, password: pwd, source: label)
+                if !items.contains(where: { $0.id == cred.id }) { items.append(cred) }
+                count += 1
+            }
+            if count > 0 {
+                save()
+                append("  ✓ 表 \(table)（\(macCol)/\(pwdCol)）导入 \(count) 条")
+                return
+            } else {
+                append("  表 \(table) 有 mac/password 字段但无有效行")
             }
         }
-        sqlite3_finalize(stmt)
-        importReport.append("  表 \(table) 字段：\(cols.joined(separator: ","))")
+    }
 
-        func pick(_ keys: [String]) -> String? {
-            cols.first { c in keys.contains { c.lowercased().contains($0) } }
-        }
-        guard let macCol = pick(["mac"]), let pwdCol = pick(["password", "pwd", "pass", "key"]) else {
-            importReport.append("  没有 mac/password 字段")
-            return
-        }
-        let snCol = pick(["sn", "serial"]) ?? macCol
+    // MARK: - 工具
 
-        let sql = "SELECT \(macCol), \(pwdCol), \(snCol) FROM \(table) WHERE \(macCol) IS NOT NULL"
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-        defer { sqlite3_finalize(stmt) }
-        var count = 0
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            func text(_ i: Int32) -> String {
-                guard let c = sqlite3_column_text(stmt, i) else { return "" }
-                return String(cString: c)
-            }
-            let mac = text(0), pwd = text(1), sn = text(2)
-            guard !pwd.isEmpty else { continue }
-            let cred = VehicleCredential(mac: mac, sn: sn, password: pwd, source: "ninebot-db")
-            if !items.contains(where: { $0.id == cred.id }) { items.append(cred) }
-            count += 1
-        }
-        if count > 0 {
-            save()
-            importReport.append("  导入 \(count) 条凭据")
-        }
+    private func append(_ s: String) { importReport.append(s) }
+
+    /// 保存一份诊断文本，方便导出
+    func report(_ text: String) {
+        let path = NSHomeDirectory() + "/Documents/import-report.txt"
+        try? text.write(toFile: path, atomically: true, encoding: .utf8)
     }
 }

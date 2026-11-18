@@ -1,0 +1,36 @@
+workflows:
+  ios-unsigned:
+    name: NinebotCal unsigned IPA
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      xcode: latest
+      vars:
+        SCHEME: NinebotCal
+    scripts:
+      - name: Install xcodegen
+        script: brew install xcodegen
+      - name: Generate project
+        script: xcodegen generate
+      - name: Build (unsigned)
+        script: |
+          set -o pipefail
+          xcodebuild \
+            -project NinebotCal.xcodeproj \
+            -scheme $SCHEME \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            clean build
+      - name: Package IPA
+        script: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/NinebotCal.app Payload/
+          zip -qry NinebotCal.ipa Payload
+          ls -lh NinebotCal.ipa
+    artifacts:
+      - NinebotCal.ipa

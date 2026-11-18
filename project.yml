@@ -1,0 +1,34 @@
+name: NinebotCal
+options:
+  bundleIdPrefix: com.bfg
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGN_IDENTITY: ""
+targets:
+  NinebotCal:
+    type: application
+    platform: iOS
+    sources:
+      - path: NinebotCal
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bfg.ninebotcal
+        INFOPLIST_FILE: NinebotCal/Info.plist
+        OTHER_LDFLAGS:
+          - "-lsqlite3"
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: "NO"
+        CODE_SIGN_ENTITLEMENTS: NinebotCal/NinebotCal.entitlements
+        GENERATE_INFOPLIST_FILE: "NO"

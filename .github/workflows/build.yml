@@ -38,6 +38,8 @@ jobs:
           set -e
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/NinebotCal.app Payload/
+          codesign --force --sign - --entitlements NinebotCal/NinebotCal.entitlements Payload/NinebotCal.app || echo "codesign skipped"
+          codesign -dv Payload/NinebotCal.app 2>&1 | head -5 || true
           zip -qry NinebotCal.ipa Payload
           ls -lh NinebotCal.ipa
 

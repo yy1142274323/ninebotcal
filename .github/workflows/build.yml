@@ -1,0 +1,48 @@
+name: build-ipa
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project NinebotCal.xcodeproj \
+            -scheme NinebotCal \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            clean build 2>&1 | tail -n 80
+
+      - name: Package IPA
+        run: |
+          set -e
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/NinebotCal.app Payload/
+          zip -qry NinebotCal.ipa Payload
+          ls -lh NinebotCal.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NinebotCal-ipa
+          path: NinebotCal.ipa
+          if-no-files-found: error

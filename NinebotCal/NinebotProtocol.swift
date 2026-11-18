@@ -197,7 +197,7 @@ final class NBCipher {
 
     func establish(authParam: Data) {
         self.authParam = authParam
-        key2 = NSha1.digest([pwd16, NB.pad16(authParam)]).prefix(16)
+        key2 = NSha1.digest([pwd16, NSha1.pad16(authParam)]).prefix(16)
     }
 
     private func iv(_ counter: Int) -> Data {

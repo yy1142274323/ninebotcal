@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- TrollStore 安装会以 platform-application 重新签名；下面两项让 App 能读别的沙盒。
+         如果导入凭据失败，直接在 App 里手输 16 位密码即可，不影响读写车辆。 -->
+    <key>platform-application</key>
+    <true/>
+    <key>com.apple.private.security.no-sandbox</key>
+    <true/>
+    <key>com.apple.security.exception.files.absolute-path.read-only</key>
+    <array>
+        <string>/var/mobile/Containers/Data/Application/</string>
+    </array>
+</dict>
+</plist>

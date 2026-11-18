@@ -131,6 +131,8 @@ struct CalibrateView: View {
     @ObservedObject var session: VehicleSession
     @State private var confirmOpen = false
     @State private var riskAccepted = false
+    @State private var capacityMode = 0
+    @State private var customCapacity = 50000
 
     init(model: AppModel) {
         self.model = model
@@ -167,20 +169,37 @@ struct CalibrateView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    Toggle("同时修改容量槽位", isOn: Binding(
-                        get: { model.targetCapacitySlot != nil },
-                        set: { on in
-                            model.targetCapacitySlot = on ? NB.profileSlot(currentProfile ?? 0x32) : nil
-                        }))
+                    Picker("容量处理", selection: $capacityMode) {
+                        Text("只改电压").tag(0)
+                        Text("档位槽").tag(1)
+                        Text("自定义").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: capacityMode) { v in
+                        if v != 1 { model.targetCapacitySlot = nil }
+                        else if model.targetCapacitySlot == nil { model.targetCapacitySlot = NB.profileSlot(currentProfile ?? 0x32) }
+                    }
 
-                    if let slot = model.targetCapacitySlot {
-                        Picker("容量槽位", selection: Binding(
-                            get: { slot },
+                    if capacityMode == 1 {
+                        Picker("档位槽容量", selection: Binding(
+                            get: { model.targetCapacitySlot ?? NB.profileSlot(currentProfile ?? 0x32) },
                             set: { model.targetCapacitySlot = $0 })) {
                             ForEach(0..<16, id: \.self) { i in
                                 Text("\(i) · \(NB.capacitySlots[i] / 1000)Ah").tag(i)
                             }
                         }
+                    }
+
+                    if capacityMode == 2 {
+                        HStack {
+                            Text("容量")
+                            TextField("50000", value: $customCapacity, format: .number)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                            Text("mAh")
+                        }
+                        Text("50Ah = 50000mAh。档位表里没有 50Ah（固件固定 16 档），这类值只能写 0x1C 原始寄存器。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
 
                     if let p = currentProfile,
@@ -203,9 +222,18 @@ struct CalibrateView: View {
                     } label: { Label("重新读取车辆数据", systemImage: "arrow.clockwise") }
 
                     Button(role: .destructive) { confirmOpen = true } label: {
-                        Label("写入并回读校验", systemImage: "square.and.arrow.down")
+                        Label("写入电压档位并回读校验", systemImage: "square.and.arrow.down")
                     }
                     .disabled(session.phase != .ready || currentProfile == nil)
+
+                    if capacityMode == 2 {
+                        Button {
+                            Task { await doWriteCapacity() }
+                        } label: {
+                            Label("写入容量 0x1C（\(customCapacity) mAh）", systemImage: "gauge.with.needle")
+                        }
+                        .disabled(session.phase != .ready)
+                    }
                 }
 
                 if let o = model.lastOutcome {
@@ -267,6 +295,17 @@ struct CalibrateView: View {
             }
             .navigationTitle("写入确认").navigationViewStyle(.stack)
         }
+    }
+
+    private func doWriteCapacity() async {
+        do {
+            let o = try await session.writeCapacity(mAh: customCapacity)
+            if o.verified {
+                model.alert = "容量已写入并回读确认：\(o.before) → \(o.target) mAh（dst 0x\(String(format: "%02X", o.usedDst ?? 0))）"
+            } else {
+                model.alert = "容量写入未确认（回读 \(o.readback.map(String.init) ?? "无响应")）。不要连续重复写，先重新连接读一次当前值。"
+            }
+        } catch { model.alert = error.localizedDescription }
     }
 
     private func doWrite() async {

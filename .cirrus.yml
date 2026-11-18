@@ -1,0 +1,15 @@
+task:
+  name: NinebotCal unsigned IPA
+  macos_instance:
+    image: ghcr.io/cirruslabs/macos-sonoma-xcode:latest
+  install_script: brew install xcodegen
+  build_script:
+    - xcodegen generate
+    - |
+      xcodebuild -project NinebotCal.xcodeproj -scheme NinebotCal \
+        -sdk iphoneos -configuration Release -derivedDataPath build \
+        CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+        ENABLE_USER_SCRIPT_SANDBOXING=NO clean build
+    - mkdir -p Payload && cp -R build/Build/Products/Release-iphoneos/NinebotCal.app Payload/ && zip -qry NinebotCal.ipa Payload && ls -lh NinebotCal.ipa
+  artifacts:
+    path: NinebotCal.ipa

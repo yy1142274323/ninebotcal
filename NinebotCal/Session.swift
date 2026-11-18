@@ -101,7 +101,9 @@ final class VehicleSession: ObservableObject {
         try await Task.sleep(nanoseconds: 300_000_000)
         note("发送 PRE_COMM（Enc1）")
 
+        note("等待 PRE_COMM 回复（8s）")
         let reply = try await precommTransaction(NB.preComm, timeout: 8)
+        note("PRE_COMM 收到 \(reply.raw.count)B")
         guard reply.raw.count >= 37 else { throw NBError.handshake("PRE_COMM 回复过短") }
         let flag = reply.raw[6]
         let authParam = reply.raw.subdata(in: 7..<23)
@@ -132,7 +134,11 @@ final class VehicleSession: ObservableObject {
     }
 
     private func handle(_ data: Data) {
-        guard let c = cipher else { return }
+        note("RX \(data.count)B  \(data.hexString.prefix(48))")
+        guard let c = cipher else {
+            note("收到数据但还没有密钥（握手未开始）")
+            return
+        }
 
         if phase == .precomm {
             let plain = c.decryptEnc1(data)
@@ -203,8 +209,13 @@ final class VehicleSession: ObservableObject {
 
     /// AUTH 的应答形态不固定：收到任意可解密帧即视为认证已处理
     private func anyTransaction(plain: Data, timeout: Double) async throws -> NB.Frame {
-        guard let c = cipher else { throw NBError.notConnected }
-        let framed = c.encryptEnc2(counter: nextCounter(), plain: plain)
+        guard let c = cipher else {
+            note("发送失败：会话密钥还没建立，请先在「连接」页点车辆完成握手")
+            throw NBError.handshake("会话未建立（请先点车辆连接）")
+        }
+        let ctr = nextCounter()
+        let framed = c.encryptEnc2(counter: ctr, plain: plain)
+        note("TX ctr=\(ctr)  \(plain.hexString.prefix(40))")
         let waiter = Waiter()
         anyWaiter = waiter
         let work = DispatchWorkItem { [weak self] in
@@ -226,8 +237,13 @@ final class VehicleSession: ObservableObject {
     }
     private func transaction(plain: Data, expectSrc: UInt8?, expectReg: UInt8?,
                              timeout: Double, allowAnyReg: Bool = false) async throws -> NB.Frame {
-        guard let c = cipher else { throw NBError.notConnected }
-        let framed = c.encryptEnc2(counter: nextCounter(), plain: plain)
+        guard let c = cipher else {
+            note("发送失败：会话密钥还没建立，请先在「连接」页点车辆完成握手")
+            throw NBError.handshake("会话未建立（请先点车辆连接）")
+        }
+        let ctr = nextCounter()
+        let framed = c.encryptEnc2(counter: ctr, plain: plain)
+        note("TX ctr=\(ctr)  \(plain.hexString.prefix(40))")
         let waiter = Waiter()
         waiter.src = expectSrc
         waiter.reg = allowAnyReg ? nil : expectReg
@@ -267,6 +283,11 @@ final class VehicleSession: ObservableObject {
     }
 
     func readAll() async {
+        guard phase == .ready, cipher != nil, ble.isConnected else {
+            note("读取被跳过：会话未就绪（当前 \(phase.rawValue)）")
+            busy = ""
+            return
+        }
         busy = "读取车辆数据…"
         for r in NB.registers {
             do {

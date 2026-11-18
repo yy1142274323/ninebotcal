@@ -1,7 +1,13 @@
 name: probe
-on: workflow_dispatch:
+on:
+  workflow_dispatch:
 jobs:
   hello:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-13, macos-14]
+    runs-on: ${{ matrix.os }}
     steps:
-      - run: echo hi
+      - run: uname -a
+      - run: xcodebuild -version || true

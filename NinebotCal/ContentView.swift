@@ -48,7 +48,7 @@ struct ConnectView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             List {
                 Section("状态") {
                     HStack {
@@ -96,7 +96,7 @@ struct ConnectView: View {
                 } header: { Text("附近设备") }
                 footer: { Text("先唤醒车辆并靠近手机；关掉主机上的九号出行，避免占用蓝牙。") }
             }
-            .navigationTitle("NinebotCal")
+            .navigationTitle("NinebotCal").navigationViewStyle(.stack)
             .overlay {
                 if !session.busy.isEmpty { ProgressView().controlSize(.large) }
             }
@@ -141,7 +141,7 @@ struct CalibrateView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             List {
                 Section("车辆") {
                     row("车辆 SN", session.snText)
@@ -235,7 +235,7 @@ struct CalibrateView: View {
                     }
                 }
             }
-            .navigationTitle("电量校准")
+            .navigationTitle("电量校准").navigationViewStyle(.stack)
             .sheet(isPresented: $confirmOpen) { confirmSheet }
             .alert("提示", isPresented: Binding(get: { model.alert != nil },
                                                set: { if !$0 { model.alert = nil } })) {
@@ -245,7 +245,7 @@ struct CalibrateView: View {
     }
 
     private var confirmSheet: some View {
-        NavigationStack {
+        NavigationView {
             List {
                 Section {
                     Text("写入前会自动重新读取当前档位并留作备份；写入后立即回读校验，不通过不会连续重试。")
@@ -263,7 +263,7 @@ struct CalibrateView: View {
                     .disabled(!riskAccepted)
                 }
             }
-            .navigationTitle("写入确认")
+            .navigationTitle("写入确认").navigationViewStyle(.stack)
         }
     }
 
@@ -301,7 +301,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             List {
                 Section("已保存凭据（Keychain）") {
                     ForEach(store.items) { c in
@@ -344,7 +344,7 @@ struct SettingsView: View {
                     .frame(maxHeight: 260)
                 }
             }
-            .navigationTitle("设置")
+            .navigationTitle("设置").navigationViewStyle(.stack)
         }
     }
 }

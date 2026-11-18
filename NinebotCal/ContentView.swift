@@ -1,5 +1,7 @@
 ﻿import SwiftUI
 import Combine
+import UIKit
+import UniformTypeIdentifiers
 
 final class AppModel: ObservableObject {
     @Published var password: String = ""
@@ -293,6 +295,7 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var store: CredentialStore
     @ObservedObject var session: VehicleSession
+    @State private var showImporter = false
 
     init(model: AppModel) {
         self.model = model
@@ -322,11 +325,27 @@ struct SettingsView: View {
                     Button { store.importFromNinebotApp() } label: {
                         Label("从九号出行沙盒导入", systemImage: "tray.and.arrow.down")
                     }
-                    ForEach(store.importReport, id: \.self) { line in
-                        Text(line).font(.caption2).foregroundStyle(.secondary)
+                    Button { showImporter = true } label: {
+                        Label("从文件导入数据库…", systemImage: "doc.badge.plus")
                     }
-                } header: { Text("越狱导入") }
-                footer: { Text("需要 TrollStore / 无沙盒权限的安装方式，才能读取 /var/mobile/Containers/Data/Application 下官方 App 的 SQLite。") }
+                    if !store.importReport.isEmpty {
+                        Button {
+                            UIPasteboard.general.string = store.importReport.joined(separator: "\n")
+                        } label: {
+                            Label("复制诊断报告", systemImage: "doc.on.doc")
+                        }
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(store.importReport.enumerated()), id: \.offset) { _, line in
+                                    Text(line).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 220)
+                    }
+                } header: { Text("凭据导入") }
+                footer: { Text("沙盒导入需要无沙盒权限（TrollStore 安装且未被重新限制）。读不到就用「从文件导入数据库」：Filza 把九号 App 的 .sqlite 拷出来再选进来。") }
 
                 Section("协议") {
                     Text("UART 6e400001-…\nTX 6e400002-… / RX 6e400003-…\n帧 5A A5 LEN SRC DST CMD REG DATA\nEnc1 SHA1(pwd‖KEY0) + AES-ECB 流\nEnc2 SHA1(pwd‖authParam) + CBC-MAC")
@@ -345,6 +364,17 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("设置").navigationViewStyle(.stack)
+            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    store.importDatabase(at: url.path)
+                case .failure(let err):
+                    store.importReport = ["选择文件失败：\(err.localizedDescription)"]
+                }
+            }
         }
     }
 }

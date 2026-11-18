@@ -1,4 +1,4 @@
-import Foundation
+﻿import Foundation
 import Security
 import SQLite3
 
@@ -88,10 +88,12 @@ final class CredentialStore: ObservableObject {
 
             var ninebot: [(String, String)] = []
             var sample: [String] = []
+            var map: [String] = []
             for d in dirs {
                 let path = root + "/" + d
                 guard let dict = NSDictionary(contentsOfFile: path + "/.com.apple.mobile_container_manager.metadata.plist") as? [String: Any],
                       let bid = dict["MCMMetadataIdentifier"] as? String else { continue }
+                map.append("\(d)\t\(bid)")
                 let low = bid.lowercased()
                 if low.contains("ninebot") || low.contains("segway") || low.contains("nb.") || low.contains("scooter") {
                     ninebot.append((path, bid))
@@ -99,11 +101,16 @@ final class CredentialStore: ObservableObject {
                     sample.append(bid)
                 }
             }
+            // 落盘一份 UUID -> bundle id 对照表，方便在 Filza / 文件里查
+            let mapPath = NSHomeDirectory() + "/Documents/containers.txt"
+            try? map.sorted().joined(separator: "\n").write(toFile: mapPath, atomically: true, encoding: .utf8)
+            append("对照表已写入 Documents/containers.txt（\(map.count) 条）")
 
             if ninebot.isEmpty {
                 append("没有匹配到 ninebot/segway 容器。随机列几个已装 App 的 bundle id：")
                 sample.forEach { append("  · \($0)") }
-                append("→ 说明这台 iPhone 上没装九号出行，或它的 bundle id 不含 ninebot（可把上面列表发我）")
+                append("→ 说明这台 iPhone 上没装九号出行，或它的 bundle id 不含 ninebot")
+                append("对照表见 Documents/containers.txt，可用「文件」App 打开本 App 的文件夹查看")
                 report("未找到九号容器")
                 return
             }

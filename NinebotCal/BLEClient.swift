@@ -68,11 +68,23 @@ final class BLEClient: NSObject, ObservableObject {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             self.connectContinuation = cont
             central.connect(p, options: nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self, weak p] in
+                guard let self, let c = self.connectContinuation else { return }
+                self.connectContinuation = nil
+                c.resume(throwing: NBError.timeout("BLE 连接超时（12s）"))
+                if let p = p { self.central.cancelPeripheralConnection(p) }
+            }
         }
         statusText = "发现服务…"
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             self.serviceContinuation = cont
             p.discoverServices([CBUUID(string: NB.svcUART)])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self, weak p] in
+                guard let self, let c = self.serviceContinuation else { return }
+                self.serviceContinuation = nil
+                c.resume(throwing: NBError.timeout("发现服务超时（10s）"))
+                if let p = p { self.central.cancelPeripheralConnection(p) }
+            }
         }
     }
 
@@ -154,6 +166,8 @@ extension BLEClient: CBCentralManagerDelegate {
         isConnected = true
         connectedName = peripheral.name ?? "车辆"
         statusText = "已连接，发现服务…"
+        connectContinuation?.resume()
+        connectContinuation = nil
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
@@ -165,7 +179,15 @@ extension BLEClient: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         isConnected = false
-        statusText = "连接已断开"
+        statusText = "连接已断开" + (error.map { "：\($0.localizedDescription)" } ?? "")
+        if let c = connectContinuation {
+            connectContinuation = nil
+            c.resume(throwing: NBError.handshake("连接被断开" + (error.map { "：\($0.localizedDescription)" } ?? "")))
+        }
+        if let c = serviceContinuation {
+            serviceContinuation = nil
+            c.resume(throwing: NBError.handshake("发现服务前连接断开"))
+        }
         txChar = nil
         rxChar = nil
         for c in writeContinuations { c.resume(throwing: NBError.notConnected) }

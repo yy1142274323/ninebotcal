@@ -360,6 +360,55 @@ final class VehicleSession: ObservableObject {
         return WriteOutcome(before: beforeByte, target: target, readback: nil, verified: false)
     }
 
+    // MARK: - 容量写入（0x1C，LE16，单位 mAh）
+
+    struct CapacityOutcome {
+        let before: Int
+        let target: Int
+        let readback: Int?
+        let verified: Bool
+        let usedDst: UInt8?
+    }
+
+    /// 0x1C 是原始容量（mAh，小端 16 位），不受仪表档位表限制，50Ah 这类值只能走这里。
+    /// 先按 0x01（中控）写，回读不对再试 0x10（仪表），全程只写一次、靠回读判定。
+    func writeCapacity(mAh: Int) async throws -> CapacityOutcome {
+        guard phase == .ready else { throw NBError.handshake("会话未就绪") }
+        guard mAh > 0, mAh <= 65535 else { throw NBError.invalidArgument("容量必须在 1…65535 mAh") }
+        guard !snText.uppercased().hasPrefix("N") else {
+            throw NBError.protocolError("该序列号以 N 开头，本工具仅提供只读")
+        }
+        defer { busy = "" }
+
+        busy = "读取当前容量…"
+        let before = try await read(NB.register("dis_capacity")!)
+        note("当前 0x1C = \(before) mAh")
+
+        let data = Data([UInt8(mAh & 0xFF), UInt8((mAh >> 8) & 0xFF)])
+        for dst in [NB.dstMain, NB.dstDIS] {
+            busy = String(format: "写入容量 → dst 0x%02X", dst)
+            let plain = NB.frame(dst: dst, cmd: NB.cmdWrite, reg: 0x1C, data: data)
+            note(String(format: "写 0x1C dst=0x%02X data=%02X %02X", dst, data[0], data[1]))
+            do {
+                _ = try await transaction(plain: plain, expectSrc: dst, expectReg: 0x1C,
+                                          timeout: 4, allowAnyReg: true)
+                note("收到写入应答")
+            } catch {
+                note("写入应答未收到：\(error.localizedDescription)，继续回读")
+            }
+            busy = "回读容量…"
+            for i in 0..<4 {
+                if let v = try? await read(NB.register("dis_capacity")!) {
+                    note("回读 \(i + 1)/4：\(v) mAh")
+                    if v == mAh {
+                        return CapacityOutcome(before: before, target: mAh, readback: v, verified: true, usedDst: dst)
+                    }
+                }
+                try await Task.sleep(nanoseconds: 450_000_000)
+            }
+        }
+        return CapacityOutcome(before: before, target: mAh, readback: nil, verified: false, usedDst: nil)
+    }
     private func verifyProfile(target: UInt8) async throws -> UInt8? {
         for i in 0..<4 {
             do {

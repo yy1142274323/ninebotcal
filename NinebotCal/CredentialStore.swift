@@ -1,4 +1,4 @@
-import Foundation
+﻿import Foundation
 import Security
 import SQLite3
 
@@ -161,7 +161,9 @@ final class CredentialStore: ObservableObject {
             let attrs = try? fm.attributesOfItem(atPath: full)
             let size = (attrs?[.size] as? Int) ?? 0
 
-            if low.hasSuffix(".plist") && size < 512_000 {
+            if low.hasSuffix("ble_devices.json") {
+                parseBleDevices(at: full, label: rel)
+            } else if low.hasSuffix(".plist") && size < 512_000 {
                 plistCount += 1
                 dumpPlist(at: full, label: rel, budget: 60)
             } else if low.hasSuffix(".sqlite") || low.hasSuffix(".db") || low.hasSuffix(".sqlite3") {
@@ -174,6 +176,36 @@ final class CredentialStore: ObservableObject {
         append("  扫描：plist \(plistCount) 个，数据库 \(dbCount) 个")
     }
 
+    // MARK: - ble_devices.json（iOS 版的凭据库）
+
+    /// 九号 iOS 把 BLE 凭据存在 Documents/rust_lib/kv/ble_devices.json，JSON-Lines 格式：
+    /// {"k":"<peripheral-uuid>","v":{"bleType":4354,"encVer":2,"key":20035,"name":"…","sn":"…"}}
+    /// key 就是 BLE 密码（5 位 PIN），SN 是 14 位车辆序列号。
+    private func parseBleDevices(at path: String, label: String) {
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return }
+        var found = 0
+        for line in text.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty,
+                  let data = trimmed.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let v = obj["v"] as? [String: Any],
+                  let sn = v["sn"] as? String, !sn.isEmpty else { continue }
+            let keyVal = v["key"]
+            let pwd: String
+            if let n = keyVal as? NSNumber { pwd = n.stringValue }
+            else if let s = keyVal as? String { pwd = s }
+            else { continue }
+            let name = (v["name"] as? String) ?? ""
+            let enc = (v["encVer"] as? NSNumber)?.stringValue ?? "?"
+            let cred = VehicleCredential(mac: name.isEmpty ? sn : name, sn: sn,
+                                         password: pwd, source: "ble_devices.json")
+            if !items.contains(where: { $0.sn == sn && $0.password == pwd }) { items.append(cred) }
+            append("  ✓ 车 \(name.isEmpty ? sn : name) · SN \(sn) · key=\(pwd) · encVer=\(enc)")
+            found += 1
+        }
+        if found > 0 { save() }
+    }
     // MARK: - plist 翻字段
 
     private func dumpPlist(at path: String, label: String, budget: Int) {

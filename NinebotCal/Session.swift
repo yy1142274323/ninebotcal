@@ -84,11 +84,21 @@ final class VehicleSession: ObservableObject {
     // MARK: - 连接与握手
 
     func connectAndHandshake(device: Discovery, password: String) async throws {
+        resetSession()
         try await ble.connect(device)
         note("已连接 \(device.name)")
         try await handshake(password: password)
     }
 
+    /// 每次重新连接前清空上一次的会话状态，避免残留等待者
+    func resetSession() {
+        failAll(NBError.handshake("会话重置"))
+        cipher = nil
+        counter = 2
+        phase = .disconnected
+        values.removeAll()
+        profileRaw = nil
+    }
     func handshake(password: String) async throws {
         guard !password.isEmpty else {
             throw NBError.handshake("请先填写 BLE 密码（5 位 PIN 也可以）")

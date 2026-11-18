@@ -1,4 +1,4 @@
-import Foundation
+﻿import Foundation
 import Combine
 
 /// 与车辆的一次会话：PRE_COMM -> AUTH -> 寄存器读写
@@ -90,9 +90,11 @@ final class VehicleSession: ObservableObject {
     }
 
     func handshake(password: String) async throws {
-        guard password.count >= 16 else {
-            throw NBError.handshake("BLE 密码需要 16 个字符")
+        guard !password.isEmpty else {
+            throw NBError.handshake("请先填写 BLE 密码（5 位 PIN 也可以）")
         }
+        if password.count > 16 { note("密码超过 16 字符，只用前 16 位") }
+        note("密码长度 \(password.count)，按协议补零到 16 字节")
         let c = NBCipher(password: password)
         cipher = c
         phase = .precomm

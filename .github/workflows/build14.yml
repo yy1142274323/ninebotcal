@@ -1,0 +1,25 @@
+name: build14
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - run: |
+          set -o pipefail
+          xcodebuild -project NinebotCal.xcodeproj -scheme NinebotCal -sdk iphoneos -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" ENABLE_USER_SCRIPT_SANDBOXING=NO clean build 2>&1 | tail -n 60
+      - run: |
+          set -e
+          APP=build/Build/Products/Release-iphoneos/NinebotCal.app
+          rm -rf Payload; mkdir -p Payload; cp -R "$APP" Payload/
+          codesign --force --sign - --entitlements NinebotCal/NinebotCal.entitlements Payload/NinebotCal.app
+          zip -qry NinebotCal.ipa Payload
+          ls -lh NinebotCal.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NinebotCal-ipa14
+          path: NinebotCal.ipa

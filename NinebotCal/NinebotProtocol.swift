@@ -187,7 +187,7 @@ final class NBCipher {
     private(set) var authParam: Data?
     private(set) var key2: Data?
 
-    init(password: String) {
+    convenience init(password: String) {
         var bytes = Array(password.data(using: .ascii) ?? Data())
         if bytes.count > 16 { bytes = Array(bytes.prefix(16)) }
         while bytes.count < 16 { bytes.append(0) }

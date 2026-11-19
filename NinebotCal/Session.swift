@@ -89,7 +89,24 @@ final class VehicleSession: ObservableObject {
         resetSession()
         try await ble.connect(device)
         note("已连接 \(device.name)")
-        try await handshake(password: password)
+        do {
+            try await handshake(password: password)
+        } catch {
+            note("握手没有完成：\(error.localizedDescription)")
+            note("自动诊断开始，约 40 秒，期间不要操作手机…")
+            await autoDiagnose()
+            note("自动诊断结束，请点「复制日志」把内容发出去")
+            throw error
+        }
+    }
+
+    /// 握手失败后自动跑一遍探针，把结论写进日志
+    func autoDiagnose() async {
+        await probeListen(seconds: 3)
+        await probePlain(NB.preComm, wait: 2)
+        await probePlain(NB.frame(dst: NB.dstMain, cmd: NB.cmdRead, reg: 0x1A, data: Data([0x02])), wait: 2)
+        await probePasswordVariants()
+        await probeEnc2PreComm()
     }
 
     // MARK: - 握手探针

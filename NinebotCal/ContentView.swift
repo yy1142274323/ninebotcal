@@ -1,4 +1,4 @@
-import SwiftUI
+﻿import SwiftUI
 import Combine
 import UIKit
 import UniformTypeIdentifiers
@@ -419,10 +419,15 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(Array(session.log.enumerated()), id: \.offset) { _, l in
                                 Text(l).font(.caption2.monospaced())
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .textSelection(.enabled)
                             }
                         }
                     }
                     .frame(maxHeight: 260)
+                    Button {
+                        UIPasteboard.general.string = session.log.joined(separator: "\n")
+                    } label: { Label("复制日志（\(session.log.count) 行）", systemImage: "doc.on.doc") }
                 }
             }
             .navigationTitle("设置").navigationViewStyle(.stack)

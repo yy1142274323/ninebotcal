@@ -105,6 +105,21 @@ struct ConnectView: View {
                     }
                 } header: { Text("附近设备") }
                 footer: { Text("先唤醒车辆并靠近手机；关掉主机上的九号出行，避免占用蓝牙。") }
+
+                Section("运行日志") {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(session.log.suffix(40).enumerated()), id: \.offset) { _, line in
+                                Text(line).font(.caption2.monospaced())
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 260)
+                    Button {
+                        UIPasteboard.general.string = session.log.joined(separator: "\n")
+                    } label: { Label("复制日志", systemImage: "doc.on.doc") }
+                }
             }
             .navigationTitle("NinebotCal").navigationViewStyle(.stack)
             .overlay {

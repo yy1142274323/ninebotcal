@@ -1,4 +1,4 @@
-﻿import SwiftUI
+import SwiftUI
 import Combine
 import UIKit
 import UniformTypeIdentifiers
@@ -72,6 +72,14 @@ struct ConnectView: View {
                     Text("来自官方九号出行 device-db 的 password 字段。可在「设置 → 从九号出行沙盒导入」，或手动填写。")
                         .font(.caption).foregroundStyle(.secondary)
                 } header: { Text("凭据") }
+
+                Section {
+                    NavigationLink {
+                        DiagnosticsView(session: session)
+                    } label: {
+                        Label("握手探针（车不回应 PRE_COMM 时用）", systemImage: "waveform.path.ecg")
+                    }
+                } header: { Text("诊断") }
 
                 Section {
                     Button { ble.startScan() } label: {

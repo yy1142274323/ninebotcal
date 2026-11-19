@@ -23,6 +23,8 @@ final class VehicleSession: ObservableObject {
     private var cipher: NBCipher?
     private var counter: Int = 2
     private var waiters: [Waiter] = []
+    private(set) var rxCount = 0
+    private(set) var passwordKey = ""
     private var precommWaiter: Waiter?
     private var anyWaiter: Waiter?
 
@@ -90,6 +92,69 @@ final class VehicleSession: ObservableObject {
         try await handshake(password: password)
     }
 
+    // MARK: - 握手探针
+
+    func probeListen(seconds: Double) async {
+        guard ble.isConnected else { note("探针：未连接"); return }
+        rxCount = 0
+        note("探针：只监听 \(Int(seconds))s，不发任何帧…")
+        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        note("探针：收到 \(rxCount) 帧" + (rxCount == 0 ? "（车端没有主动发数据）" : ""))
+    }
+
+    func probePlain(_ frame: Data, wait: Double) async {
+        guard ble.isConnected else { note("探针：未连接"); return }
+        rxCount = 0
+        note("探针 TX(明文) \(frame.hexString)")
+        do { try await ble.send(frame) } catch {
+            note("探针发送失败：\(error.localizedDescription)")
+            return
+        }
+        try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+        note("探针：收到 \(rxCount) 帧" + (rxCount == 0 ? "（无回应）" : " ← 明文帧有回应"))
+    }
+
+    /// 用 6 种密码编码各发一次 Enc1 PRE_COMM，收到回包就停
+    func probePasswordVariants() async {
+        guard ble.isConnected else { note("探针：未连接"); return }
+        guard !passwordKey.isEmpty else { note("探针：还没有密码，请先在连接页填一次"); return }
+        let variants = NB.passwordVariants(passwordKey)
+        note("探针：密码 \"\(passwordKey)\"，共 \(variants.count) 种编码")
+        for (name, bytes) in variants {
+            let c = NBCipher(pwd16: bytes)
+            rxCount = 0
+            let frame = c.encryptEnc1(NB.preComm)
+            note("—— \(name)：\(bytes.hexString)")
+            note("   TX \(frame.hexString)")
+            do { try await ble.send(frame) } catch {
+                note("   发送失败：\(error.localizedDescription)")
+                continue
+            }
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if rxCount > 0 {
+                note("   ✅ 有回应！这个编码是对的：\(name)")
+                cipher = c
+                return
+            } else {
+                note("   无回应")
+            }
+        }
+        note("探针：6 种编码都没有回应 —— 说明不是密码编码问题，是握手协议本身不同")
+    }
+
+    /// 假设 authParam 为零向量，直接用 Enc2 发 PRE_COMM
+    func probeEnc2PreComm() async {
+        guard ble.isConnected else { note("探针：未连接"); return }
+        let zero = Data(count: 16)
+        let c = NBCipher(password: passwordKey.isEmpty ? "0" : passwordKey)
+        c.establish(authParam: zero)
+        rxCount = 0
+        let frame = c.encryptEnc2(counter: 2, plain: NB.preComm)
+        note("探针 TX(Enc2 零向量) \(frame.hexString)")
+        do { try await ble.send(frame) } catch { note("发送失败：\(error.localizedDescription)"); return }
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        note("探针：收到 \(rxCount) 帧")
+    }
     /// 每次重新连接前清空上一次的会话状态，避免残留等待者
     func resetSession() {
         failAll(NBError.handshake("会话重置"))
@@ -105,6 +170,7 @@ final class VehicleSession: ObservableObject {
         }
         if password.count > 16 { note("密码超过 16 字符，只用前 16 位") }
         note("密码长度 \(password.count)，按协议补零到 16 字节")
+        passwordKey = password
         let c = NBCipher(password: password)
         cipher = c
         phase = .precomm
@@ -144,6 +210,7 @@ final class VehicleSession: ObservableObject {
     }
 
     private func handle(_ data: Data) {
+        rxCount += 1
         note("RX \(data.count)B  \(data.hexString.prefix(48))")
         guard let c = cipher else {
             note("收到数据但还没有密钥（握手未开始）")

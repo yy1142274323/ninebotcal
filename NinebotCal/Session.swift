@@ -67,6 +67,7 @@ final class VehicleSession: ObservableObject {
 
     init() {
         ble.onNotification = { [weak self] data in self?.handle(data) }
+        ble.onLog = { [weak self] s in self?.note(s) }
         ble.onDisconnect = { [weak self] err in
             guard let self else { return }
             self.phase = .disconnected

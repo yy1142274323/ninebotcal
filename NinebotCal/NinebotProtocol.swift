@@ -126,6 +126,34 @@ enum NB {
         return f
     }
 
+    /// 同一个 key 的 6 种字节化方式（探针逐个试）
+    static func passwordVariants(_ key: String) -> [(String, Data)] {
+        var out: [(String, Data)] = []
+        let ascii = Array(key.data(using: .ascii) ?? Data())
+
+        func pad(_ a: [UInt8], left: Bool) -> Data {
+            var b = Array(a.prefix(16))
+            let fill = Array(repeating: UInt8(0), count: max(0, 16 - b.count))
+            b = left ? fill + b : b + fill
+            return Data(b.prefix(16))
+        }
+
+        out.append(("ASCII 右补零", pad(ascii, left: false)))
+        out.append(("ASCII 左补零", pad(ascii, left: true)))
+
+        if let n = UInt32(key) {
+            let le = withUnsafeBytes(of: n.littleEndian) { Array($0) }
+            let be = withUnsafeBytes(of: n.bigEndian) { Array($0) }
+            out.append(("u32 小端", pad(le, left: false)))
+            out.append(("u32 大端", pad(be, left: false)))
+            out.append(("hex 字符串", pad(Array(String(format: "%04x", n).utf8), left: false)))
+            if let d = UInt64(key) {
+                let le8 = withUnsafeBytes(of: d.littleEndian) { Array($0) }
+                out.append(("u64 小端", pad(le8, left: false)))
+            }
+        }
+        return out
+    }
     static func le16(_ d: Data) -> Int { d.count >= 2 ? Int(d[0]) | (Int(d[1]) << 8) : -1 }
 }
 
@@ -163,8 +191,15 @@ final class NBCipher {
         var bytes = Array(password.data(using: .ascii) ?? Data())
         if bytes.count > 16 { bytes = Array(bytes.prefix(16)) }
         while bytes.count < 16 { bytes.append(0) }
-        pwd16 = Data(bytes)
-        key1 = NSha1.digest([pwd16, NB.key0]).prefix(16)
+        self.init(pwd16: Data(bytes))
+    }
+
+    /// 直接给 16 字节密钥材料（探针会试不同编码）
+    init(pwd16: Data) {
+        var b = Data(pwd16.prefix(16))
+        if b.count < 16 { b.append(Data(count: 16 - b.count)) }
+        self.pwd16 = b
+        key1 = NSha1.digest([b, NB.key0]).prefix(16)
         pad1 = NAES.ecbEncryptBlock(key: key1, block: NB.key0)
     }
 

@@ -27,6 +27,7 @@ final class BLEClient: NSObject, ObservableObject {
     private var writeContinuations: [CheckedContinuation<Void, Error>] = []
 
     var onNotification: ((Data) -> Void)?
+    var onLog: ((String) -> Void)?
     var onDisconnect: ((Error?) -> Void)?
 
     override init() {
@@ -118,6 +119,8 @@ final class BLEClient: NSObject, ObservableObject {
             offset += chunk.count
         }
     }
+
+    private func log(_ s: String) { onLog?(s) }
 
     private func stateText(_ s: CBManagerState) -> String {
         switch s {
@@ -218,24 +221,50 @@ extension BLEClient: CBPeripheralDelegate {
             serviceContinuation = nil
             return
         }
+        log("服务 6e400001 下共 \(service.characteristics?.count ?? 0) 个特征：")
         for c in service.characteristics ?? [] {
             let uuid = c.uuid.uuidString.lowercased()
+            let short = String(uuid.prefix(8))
+            log("  · \(short) props=0x\(String(format: "%02X", c.properties.rawValue)) \(propsText(c.properties))")
             if uuid == NB.charTX { txChar = c }
             if uuid == NB.charRX { rxChar = c }
         }
-        guard txChar != nil, rxChar != nil else {
+        guard let tx = txChar, let rx = rxChar else {
             serviceContinuation?.resume(throwing: NBError.handshake("缺少 0002/0003 特征"))
             serviceContinuation = nil
             return
         }
-        peripheral.setNotifyValue(true, for: rxChar!)
+        log("TX 可写: \(tx.properties.contains(.write)) / 无响应写: \(tx.properties.contains(.writeWithoutResponse))")
+        log("RX 可通知: \(rx.properties.contains(.notify)) / 可指示: \(rx.properties.contains(.indicate))")
+        log("MTU 可用写长度: \(peripheral.maximumWriteValueLength(for: .withResponse)) B")
+        peripheral.setNotifyValue(true, for: rx)
         serviceContinuation?.resume()
         serviceContinuation = nil
         statusText = "通道已就绪"
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
-        if let e = error { statusText = "开启通知失败：\(e.localizedDescription)" }
+        let short = String(characteristic.uuid.uuidString.lowercased().prefix(8))
+        if let e = error {
+            statusText = "开启通知失败：\(e.localizedDescription)"
+            log("通知失败 \(short)：\(e.localizedDescription)")
+        } else {
+            log("通知状态 \(short) isNotifying=\(characteristic.isNotifying)")
+            if !characteristic.isNotifying {
+                log("⚠️ 通知没开起来！车回了也收不到。重试…")
+                peripheral.setNotifyValue(true, for: characteristic)
+            }
+        }
+    }
+
+    private func propsText(_ p: CBCharacteristicProperties) -> String {
+        var a: [String] = []
+        if p.contains(.read) { a.append("read") }
+        if p.contains(.write) { a.append("write") }
+        if p.contains(.writeWithoutResponse) { a.append("writeNR") }
+        if p.contains(.notify) { a.append("notify") }
+        if p.contains(.indicate) { a.append("indicate") }
+        return a.joined(separator: "|")
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {

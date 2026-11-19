@@ -96,7 +96,13 @@ final class VehicleSession: ObservableObject {
             note("握手没有完成：\(error.localizedDescription)")
             note("自动诊断开始，约 40 秒，期间不要操作手机…")
             await autoDiagnose()
-            note("自动诊断结束，请点「复制日志」把内容发出去")
+            note("自动诊断结束，正在自动上传日志…")
+            do {
+                let name = try await LogUpload.upload(log.joined(separator: "\n"))
+                note("✅ 日志已自动上传：\(name)")
+            } catch {
+                note("自动上传失败：\(error.localizedDescription)（可点「上传日志到服务器」重试）")
+            }
             throw error
         }
     }

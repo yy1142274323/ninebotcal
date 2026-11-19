@@ -119,6 +119,15 @@ struct ConnectView: View {
                     Button {
                         UIPasteboard.general.string = session.log.joined(separator: "\n")
                     } label: { Label("复制日志", systemImage: "doc.on.doc") }
+                    Button {
+                        Task {
+                            model.alert = "上传中…"
+                            do {
+                                let name = try await LogUpload.upload(session.log.joined(separator: "\n"))
+                                model.alert = "已上传：\(name)"
+                            } catch { model.alert = error.localizedDescription }
+                        }
+                    } label: { Label("上传日志到服务器", systemImage: "arrow.up.doc") }
                 }
             }
             .navigationTitle("NinebotCal").navigationViewStyle(.stack)
@@ -428,6 +437,15 @@ struct SettingsView: View {
                     Button {
                         UIPasteboard.general.string = session.log.joined(separator: "\n")
                     } label: { Label("复制日志（\(session.log.count) 行）", systemImage: "doc.on.doc") }
+                    Button {
+                        Task {
+                            model.alert = "上传中…"
+                            do {
+                                let name = try await LogUpload.upload(session.log.joined(separator: "\n"))
+                                model.alert = "已上传：\(name)"
+                            } catch { model.alert = error.localizedDescription }
+                        }
+                    } label: { Label("上传日志到服务器", systemImage: "arrow.up.doc") }
                 }
             }
             .navigationTitle("设置").navigationViewStyle(.stack)
